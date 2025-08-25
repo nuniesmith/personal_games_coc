@@ -1,0 +1,11 @@
+[Unit]
+Description=COC SSL Certificate Renewal Timer
+Requires=coc-ssl-renewal.service
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

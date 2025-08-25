@@ -1,0 +1,297 @@
+---
+# COC Game Server Deployment using Shared Deploy Workflow
+#
+# Required GitHub Secrets:
+# - COC_ROOT_PASSWORD: Root password for COC server
+# - LINODE_CLI_TOKEN: Linode API token for server management
+# - ACTIONS_USER_PASSWORD: Password for actions user account (optional)
+# - JORDAN_PASSWORD: Password for jordan user account (optional)
+# - TS_OAUTH_CLIENT_ID: Tailscale OAuth client ID
+# - TS_OAUTH_SECRET: Tailscale OAuth client secret
+# - TAILSCALE_TAILNET: Tailscale tailnet name (optional)
+# - CLOUDFLARE_API_TOKEN: Cloudflare API token for DNS management
+# - CLOUDFLARE_ZONE_ID: Cloudflare zone ID
+# - ADMIN_EMAIL: Admin email for monitoring/alerts (optional)
+#
+# Note: Docker images are built locally on the server during deployment
+# rather than being pushed to Docker Hub registry.
+#
+# This workflow deploys an COC game server with:
+# - Linode server provisioning (Arch Linux)
+# - Stage 0: Preflight validation on GitHub runner
+# - Stage 1: Arch Linux setup and Docker installation
+# - Stage 2: Tailscale OAuth authentication via systemd service
+# - Cloudflare DNS updates with Tailscale IP
+# - Local Docker image building and containerization
+#
+name: 🚀 Deploy COC Game Server
+
+on:
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      action_type:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - 'deploy'
+          - 'destroy'
+          - 'health-check'
+          - 'restart'
+        default: 'deploy'
+      
+      target_region:
+        description: 'Linode region'
+        required: false
+        type: choice
+        options:
+          - 'ca-central'
+          - 'us-east'
+          - 'us-west'
+          - 'eu-west'
+        default: 'ca-central'
+      
+      server_type:
+        description: 'Linode server type'
+        required: false
+        type: choice
+        options:
+          - 'g6-nanode-1'          # 1GB RAM - $5/month (sufficient for lightweight game server)
+          - 'g6-standard-1'        # 2GB RAM - $12/month
+          - 'g6-standard-2'        # 4GB RAM - $24/month
+          - 'g6-standard-4'        # 8GB RAM - $48/month
+        default: 'g6-nanode-1'
+      
+      overwrite_server:
+        description: 'Destroy and recreate server (use with caution)'
+        required: false
+        type: boolean
+        default: false
+      
+      skip_docker_build:
+        description: 'Skip building Docker images'
+        required: false
+        type: boolean
+        default: false
+      
+      confirm_destruction:
+        description: 'Type "DESTROY" to confirm destruction'
+        required: false
+        type: string
+
+jobs:
+  # COC Game Server Deployment using Shared Workflow
+  deploy-coc:
+    name: 🎮 Deploy COC Game Server
+    if: ${{ inputs.action_type != 'destroy' || inputs.confirm_destruction == 'DESTROY' }}
+    uses: nuniesmith/actions/.github/workflows/deploy.yml@main
+    with:
+      service_name: 'coc'
+      source_repository: 'coc'
+      action_type: ${{ inputs.action_type || 'deploy' }}
+      server_type: ${{ inputs.server_type || 'g6-nanode-1' }}  # $5/month basic server - perfect for lightweight game server
+      target_region: ${{ inputs.target_region || 'ca-central' }}
+      domain_suffix: 'feastorfamine.test'
+      overwrite_server: ${{ inputs.overwrite_server || true }}
+    secrets:
+      LINODE_CLI_TOKEN: ${{ secrets.LINODE_CLI_TOKEN }}
+      SERVICE_ROOT_PASSWORD: ${{ secrets.COC_ROOT_PASSWORD }}
+      ACTIONS_USER_PASSWORD: ${{ secrets.ACTIONS_USER_PASSWORD }}
+      JORDAN_PASSWORD: ${{ secrets.JORDAN_PASSWORD }}
+      TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+      TS_OAUTH_SECRET: ${{ secrets.TS_OAUTH_SECRET }}
+      TAILSCALE_TAILNET: ${{ secrets.TAILSCALE_TAILNET }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+      ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+
+  # Custom DNS Updates for COC - Multiple Records
+  dns-update-coc:
+    name: 🌐 Update COC DNS Records
+    runs-on: ubuntu-latest
+    needs: [deploy-coc]
+    if: |
+      needs.deploy-coc.result == 'success' &&
+      needs.deploy-coc.outputs.tailscale_ip != ''
+    
+    steps:
+      - name: 📁 Checkout Actions Repository
+        uses: actions/checkout@v4
+        with:
+          repository: nuniesmith/actions
+          token: ${{ github.token }}
+      
+      - name: 🌐 Update Multiple COC DNS Records
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          TAILSCALE_IP: ${{ needs.deploy-coc.outputs.tailscale_ip }}
+        run: |
+          echo "🌐 Updating multiple DNS records for COC service..."
+          echo "📍 Tailscale IP: ${TAILSCALE_IP:-'Not available'}"
+          
+          # Make the DNS updater script executable
+          chmod +x ./scripts/dns/cloudflare-updater.sh
+          
+          # List of COC subdomains to update
+          SUBDOMAINS=(
+            "coc"           # coc.feastorfamine.test
+            "www.coc"       # www.coc.feastorfamine.test  
+            "api.coc"       # api.coc.feastorfamine.test
+            "game.coc"      # game.coc.feastorfamine.test
+            "server.coc"    # server.coc.feastorfamine.test
+          )
+          
+          # Update each DNS record
+          for subdomain in "${SUBDOMAINS[@]}"; do
+            echo "🔄 Updating DNS record: ${subdomain}.feastorfamine.test → ${TAILSCALE_IP:-'Not available'}"
+            
+            ./scripts/dns/cloudflare-updater.sh update-service \
+              --service "$subdomain" \
+              --ip "${TAILSCALE_IP:-}" \
+              --domain "feastorfamine.test" \
+              --token "${CLOUDFLARE_API_TOKEN:-}" \
+              --zone-id "${CLOUDFLARE_ZONE_ID:-}" || {
+                echo "⚠️ Failed to update $subdomain.feastorfamine.test - continuing with others"
+              }
+            
+            # Small delay between updates to avoid rate limiting
+            sleep 2
+          done
+          
+          echo "✅ All COC DNS records update completed!"
+          echo "🌐 The following domains now point to ${TAILSCALE_IP:-'the new server IP'}:"
+          echo "   • coc.feastorfamine.test"
+          echo "   • www.coc.feastorfamine.test"
+          echo "   • api.coc.feastorfamine.test"
+          echo "   • game.coc.feastorfamine.test"
+          echo "   • server.coc.feastorfamine.test"
+
+  # Post-deployment summary
+  deployment-summary:
+    name: 📊 COC Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [deploy-coc, dns-update-coc]
+    if: always()
+    
+    steps:
+      - name: 📊 Display COC Deployment Summary
+        env:
+          COC_SERVER_IP: ${{ needs.deploy-coc.outputs.server_ip }}
+          COC_SERVER_ID: ${{ needs.deploy-coc.outputs.server_id }}
+          TAILSCALE_IP: ${{ needs.deploy-coc.outputs.tailscale_ip }}
+          DEPLOYMENT_STATUS: ${{ needs.deploy-coc.outputs.deployment_status }}
+          DEPLOY_RESULT: ${{ needs.deploy-coc.result }}
+        run: |
+          echo "🚀 COC Game Server Deployment Summary"
+          echo "====================================="
+          echo ""
+          echo "📊 **Deployment Results:**"
+          echo "  🎮 COC Server: ${DEPLOY_RESULT:-'Unknown'}"
+          echo "🎯 **Action:** ${{ inputs.action_type || 'deploy' }}"
+          echo ""
+          
+          # Add destruction confirmation check
+          if [[ "${{ inputs.action_type }}" == "destroy" && "${{ inputs.confirm_destruction }}" != "DESTROY" ]]; then
+            echo "⚠️ **Destruction Prevented:**"
+            echo "  • To destroy the server, you must type 'DESTROY' in the confirm_destruction field"
+            echo "  • This is a safety measure to prevent accidental destruction"
+            echo ""
+          fi
+          
+          if [[ "${DEPLOY_RESULT:-}" == "success" ]]; then
+            echo "🎮 **COC Game Server:**"
+            echo "  • Server ID: ${COC_SERVER_ID:-'Check workflow logs'}"
+            echo "  • Public IP: ${COC_SERVER_IP:-'Check workflow logs'}"
+            echo "  • Tailscale IP: ${TAILSCALE_IP:-'Check workflow logs'}"
+            echo "  • Server Type: ${{ inputs.server_type || 'g6-nanode-1' }} (1GB RAM - \$5/month)"
+            echo "  • Operating System: Arch Linux"
+            echo "  • Region: ${{ inputs.target_region || 'ca-central' }}"
+            echo ""
+            echo "🌐 **DNS Configuration:**"
+            echo "  ✅ Multiple DNS records updated automatically"
+            echo "  🔧 Cloudflare integration with Tailscale IP updates"
+            echo "  📋 Updated DNS records pointing to ${TAILSCALE_IP:-'the new server IP'}:"
+            echo "     • coc.feastorfamine.test (main domain)"
+            echo "     • www.coc.feastorfamine.test (web interface)"
+            echo "     • api.coc.feastorfamine.test (API endpoint)"
+            echo "     • game.coc.feastorfamine.test (game server)"
+            echo "     • server.coc.feastorfamine.test (server management)"
+            echo ""
+            echo "🔗 **Access Methods:**"
+            if [[ -n "${COC_SERVER_IP:-}" ]]; then
+              echo "  • SSH (public): ssh root@${COC_SERVER_IP}"
+            fi
+            if [[ -n "${TAILSCALE_IP:-}" ]]; then
+              echo "  • SSH (Tailscale): ssh root@${TAILSCALE_IP}"
+              echo "  • Game Server (Tailscale): ${TAILSCALE_IP}:27015"
+            fi
+            echo "  • Primary Domain: https://coc.feastorfamine.test"
+            echo "  • Web Interface: https://www.coc.feastorfamine.test"
+            echo "  • API Endpoint: https://api.coc.feastorfamine.test"
+            echo "  • Game Server: game.coc.feastorfamine.test:27015"
+            echo "  • Server Management: https://server.coc.feastorfamine.test"
+            echo ""
+            echo "🔧 **Stage Process Completed:**"
+            echo "  ✅ Stage 0: Preflight validation on GitHub runner"
+            echo "  ✅ Stage 1: Arch Linux setup and Docker installation"
+            echo "  ✅ Stage 2: Tailscale OAuth authentication via systemd"
+            echo "  ✅ DNS: Multiple Cloudflare records updated with Tailscale IP"
+            echo "  ✅ Service: COC game server deployed and running"
+            echo ""
+            echo "💰 **Infrastructure Cost:**"
+            case "${{ inputs.server_type || 'g6-nanode-1' }}" in
+              "g6-nanode-1")
+                echo "  • Server Cost: \$5/month (1GB RAM - g6-nanode-1)"
+                ;;
+              "g6-standard-1")
+                echo "  • Server Cost: \$12/month (2GB RAM - g6-standard-1)"
+                ;;
+              "g6-standard-2")
+                echo "  • Server Cost: \$24/month (4GB RAM - g6-standard-2)"
+                ;;
+              "g6-standard-4")
+                echo "  • Server Cost: \$48/month (8GB RAM - g6-standard-4)"
+                ;;
+              *)
+                echo "  • Server Cost: Variable (custom server type)"
+                ;;
+            esac
+            echo "  • Total Monthly Cost: Above amount (single server deployment)"
+            echo ""
+            echo "🎮 **Game Server Info:**"
+            echo "  • Port: 27015 (TCP/UDP)"
+            echo "  • Max Players: 8 (configurable)"
+            echo "  • Game Mode: COC Multiplayer"
+            echo "  • Cost: \$5/month (optimized for lightweight game server)"
+            echo ""
+            echo "🔧 **Next Steps:**"
+            echo "  1. Wait 2-5 minutes for DNS propagation"
+            echo "  2. Game server will be available shortly"
+            echo "  3. Connect using any of these domains:"
+            echo "     • Primary: coc.feastorfamine.test:27015"
+            echo "     • Game: game.coc.feastorfamine.test:27015"
+            echo "     • Server: server.coc.feastorfamine.test:27015"
+            echo "  4. Access web interfaces:"
+            echo "     • Main: https://coc.feastorfamine.test"
+            echo "     • Web: https://www.coc.feastorfamine.test"
+            echo "     • API: https://api.coc.feastorfamine.test"
+            echo "     • Management: https://server.coc.feastorfamine.test"
+            echo "  5. Monitor performance via server logs"
+            echo ""
+          elif [[ "${DEPLOY_RESULT:-}" == "failure" ]]; then
+            echo "❌ **Deployment Failed**"
+            echo "  • Check individual job logs for details"
+            echo "  • Common issues: SSH connectivity, package installation"
+            echo "  • Retry deployment after resolving issues"
+            echo ""
+          else
+            echo "⚠️ **Deployment Status:** ${DEPLOY_RESULT:-'Unknown'}"
+            echo "  • Check workflow logs for current status"
+            echo ""
+          fi
+          
+          echo "✅ **COC deployment using shared workflow complete!**"
+          echo "📖 For detailed logs, check the shared workflow jobs"

@@ -1,0 +1,15 @@
+[Unit]
+Description=COC SSL Certificate Manager
+After=network.target docker.service
+Wants=network.target
+
+[Service]
+Type=oneshot
+Environment=DOMAIN_NAME=coc.feastorfamine.test
+ExecStart=/opt/coc/scripts/ssl-manager.sh auto
+StandardOutput=journal
+StandardError=journal
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

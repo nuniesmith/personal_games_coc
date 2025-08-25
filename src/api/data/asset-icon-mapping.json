@@ -1,0 +1,49 @@
+{
+  "mappings": {
+    "BarbarianKing": {
+      "category": "heroes",
+      "index": 0
+    },
+    "ArcherQueen": {
+      "category": "heroes",
+      "index": 1
+    },
+    "MightyYak": {
+      "category": "pets",
+      "index": 1
+    },
+    "Unicorn": {
+      "category": "pets",
+      "index": 0
+    },
+    "BarbarianPuppet": {
+      "category": "equipment",
+      "index": 0
+    },
+    "RageVial": {
+      "category": "equipment",
+      "index": 1
+    },
+    "RoyalGem": {
+      "category": "equipment",
+      "index": 2
+    },
+    "TownHall1": {
+      "category": "buildings",
+      "index": 0
+    },
+    "TownHall14": {
+      "category": "buildings",
+      "index": 0
+    },
+    "TownHall15": {
+      "category": "buildings",
+      "index": 1
+    },
+    "TownHall16": {
+      "category": "buildings",
+      "index": 2
+    }
+  },
+  "updatedAt": "2025-08-20T08:27:22.008Z"
+}

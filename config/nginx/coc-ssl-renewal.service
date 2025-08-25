@@ -1,0 +1,10 @@
+[Unit]
+Description=COC SSL Certificate Renewal
+After=network.target docker.service
+
+[Service]
+Type=oneshot
+Environment=DOMAIN_NAME=coc.feastorfamine.test
+ExecStart=/opt/coc/scripts/ssl-manager.sh renew
+StandardOutput=journal
+StandardError=journal

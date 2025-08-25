@@ -1,0 +1,178 @@
+services:
+  coc-web:
+    image: ${WEB_IMAGE:-nuniesmith/coc:web-latest}
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost/api}
+        VITE_SOCKET_URL: ${VITE_SOCKET_URL:-http://localhost}
+    container_name: coc-web-app
+    # In dev we run Vite on 3000; in prod we still serve via nginx container or built assets.
+    expose: ["80", "3000"]
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - TZ=${TZ:-America/Toronto}
+      - VITE_API_URL=${VITE_API_URL:-http://localhost/api}
+      - VITE_SOCKET_URL=${VITE_SOCKET_URL:-http://localhost}
+      - WEB_DEV=${WEB_DEV:-0}
+    networks: [coc-network]
+    restart: unless-stopped
+    # Production container serves static build via nginx (no override needed)
+    # For local Vite dev, create a compose.override file instead of editing this one.
+    volumes: []
+    command: ["nginx", "-g", "daemon off;"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - coc-api
+
+  coc-api:
+    image: ${API_IMAGE:-nuniesmith/coc:api-latest}
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    container_name: coc-api-server
+    ports:
+      - "3001:3001"
+    expose: ["3001"]
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - TZ=${TZ:-America/Toronto}
+      - PORT=3001
+      - JWT_SECRET=${JWT_SECRET:-your-jwt-secret-change-this}
+      - ALLOW_DEFAULT_USERS=1
+      - FRONTEND_URL=${FRONTEND_URL:-https://feastorfamine.test}
+      - FRONTEND_URLS=${FRONTEND_URLS:-http://localhost:3000,http://localhost:5173,https://feastorfamine.test,https://feastorfamine.xyz}
+      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN:-}
+      - CLOUDFLARE_ZONE_ID=${CLOUDFLARE_ZONE_ID:-}
+      - DOMAIN_NAME=${DOMAIN_NAME:-feastorfamine.test}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      - COC_API_BASE_URL=${COC_API_BASE_URL:-https://api.clashofclans.com/v1}
+      - COC_API_TOKEN=${COC_API_TOKEN:-}
+      - COC_CLAN_TAG=${COC_CLAN_TAG:-9UQ9G99P}
+      - REDIS_URL=redis://default:${REDIS_PASSWORD:-changeme}@redis:6379
+      - SERVICE_BOT_TOKEN=${SERVICE_BOT_TOKEN:-}
+    volumes:
+      - coc-data:/app/data
+      - coc-logs:/app/logs
+      - coc-config:/app/config
+    networks: [coc-network]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    container_name: coc-redis
+    expose: ["6379"]
+    command: redis-server --requirepass ${REDIS_PASSWORD:-changeme} --appendonly yes --save 900 1 --save 300 10 --save 60 10000
+    volumes:
+      - redis-data:/data
+    environment:
+      - TZ=${TZ:-America/Toronto}
+    networks: [coc-network]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  nginx:
+    image: nginx:alpine
+    container_name: coc-nginx-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/opt/coc/ssl:ro
+      - /var/www/certbot:/var/www/certbot:ro
+      - nginx-logs:/var/log/nginx
+    environment:
+      - TZ=${TZ:-America/Toronto}
+      - DOMAIN_NAME=${DOMAIN_NAME:-feastorfamine.test}
+    networks: [coc-network]
+    restart: unless-stopped
+    depends_on:
+      - coc-web
+      - coc-api
+    healthcheck:
+  # Use internal nginx-only health endpoint (avoids HTTPS redirect & cert dependency)
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost/nginx-health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  feast-bot:
+    image: ${PY_BOT_IMAGE:-nuniesmith/coc:feastbot-latest}
+    build:
+      context: .
+      dockerfile: docker/bot/Dockerfile
+    container_name: coc-feastbot
+    environment:
+      - TZ=${TZ:-America/Toronto}
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID:-}
+      - DEV_GUILD_ID=${DEV_GUILD_ID:-}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      - COC_API_TOKEN=${COC_API_TOKEN:-}
+      - FEAST_LOCAL=1
+      - FEAST_IS_MAIN=0
+      - FEAST_IS_BETA=0
+      - FEAST_TOTAL_CLUSTERS=1
+      - STATIC_MONGODB_URI=mongodb://mongo:27017/static
+      - STATS_MONGODB_URI=mongodb://mongo:27017/stats
+      - REDIS_HOST=redis
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-changeme}
+      - FEAST_REMOTE_CONFIG_URL=${FEAST_REMOTE_CONFIG_URL:-}
+      - LINK_API_USER=${LINK_API_USER:-}
+      - LINK_API_PASSWORD=${LINK_API_PASSWORD:-}
+      - SERVICE_BOT_TOKEN=${SERVICE_BOT_TOKEN:-}
+    networks: [coc-network]
+    restart: unless-stopped
+    depends_on:
+      - coc-api
+      - mongo
+    healthcheck:
+      test: ["CMD", "bash", "-c", "/usr/local/bin/healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 50s
+
+  mongo:
+    image: mongo:7
+    container_name: coc-mongo
+    expose: ["27017"]
+    volumes:
+      - mongo-data:/data/db
+    networks: [coc-network]
+    restart: unless-stopped
+
+networks:
+  coc-network:
+    driver: bridge
+
+volumes:
+  coc-data:
+  coc-logs:
+  coc-config:
+  redis-data:
+  nginx-logs:
+  mongo-data:

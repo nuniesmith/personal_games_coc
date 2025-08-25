@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3B82F6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1E40AF;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background circle -->
+  <circle cx="16" cy="16" r="15" fill="url(#grad1)" stroke="#1E40AF" stroke-width="2"/>
+  
+  <!-- Simple shield / badge icon for Clash tools -->
+  <g fill="white" stroke="#1E3A8A" stroke-width="1">
+    <path d="M16 6 L24 10 V16 C24 20 21 23 16 26 C11 23 8 20 8 16 V10 Z" fill="#FCD34D" stroke="#B45309"/>
+    <path d="M16 9 L21 11.5 V16 C21 18.8 19.2 21 16 23 C12.8 21 11 18.8 11 16 V11.5 Z" fill="#F59E0B" stroke="none"/>
+    <rect x="15" y="11" width="2" height="8" rx="1" fill="#1F2937" />
+  </g>
+</svg>

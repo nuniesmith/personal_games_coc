@@ -1,0 +1,18 @@
+# Local development overrides enabling hot reload via bind mounts & dev commands
+services:
+  coc-api:
+    # Disable live-dev override inside container for stable development-style run
+    environment:
+      - NODE_ENV=development
+
+  coc-web:
+    # Temporarily disable Vite dev override (Node not present in nginx runtime image)
+    environment:
+      - NODE_ENV=development
+    volumes: []
+
+  nginx:
+    # For dev, proxy / to vite dev server (5173) rather than static nginx inside coc-web
+    depends_on:
+      - coc-web
+      - coc-api

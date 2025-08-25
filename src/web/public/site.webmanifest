@@ -1,0 +1,14 @@
+{
+  "name": "COC Server Manager",
+  "short_name": "COC Manager",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ],
+  "theme_color": "#FF6B35",
+  "background_color": "#1F2937",
+  "display": "standalone"
+}

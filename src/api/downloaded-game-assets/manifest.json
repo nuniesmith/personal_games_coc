@@ -1,0 +1,27 @@
+{
+  "generatedAt": "2025-08-21T05:26:17.727Z",
+  "categories": {
+    "heroes": {
+      "count": 2,
+      "files": [
+        "BarbarianKing.png",
+        "ArcherQueen.png"
+      ]
+    },
+    "pets": {
+      "count": 2,
+      "files": [
+        "Unicorn.png",
+        "MightyYak.png"
+      ]
+    },
+    "equipment": {
+      "count": 3,
+      "files": [
+        "BarbarianPuppet.png",
+        "RageVial.png",
+        "RoyalGem.png"
+      ]
+    }
+  }
+}
