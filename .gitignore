@@ -109,4 +109,4 @@ screenshots/
 # Git
 .git/
 
-.env
+.env*
